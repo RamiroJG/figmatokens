@@ -1,0 +1,330 @@
+================================================================================
+  DOCUMENTACION - PIPELINE DE TOKENS DE FIGMA A CSS
+  Proyecto: figmatokenstestt
+  Fecha: 20/03/2026
+================================================================================
+
+1. DESCRIPCION GENERAL
+================================================================================
+
+Este proyecto toma los tokens de diseno exportados desde Figma (mediante el 
+plugin Tokens Studio) y los transforma automaticamente en variables CSS 
+(custom properties) listas para usar en cualquier proyecto web.
+
+El pipeline funciona asi:
+
+  Figma (Tokens Studio) --> token/token.json --> npm run build --> build/css/_variables.css
+
+Los tokens se exportan desde Figma como un archivo JSON con multiples "sets" 
+(conjuntos de tokens). El script de build los aplana, resuelve las referencias 
+cruzadas entre sets (por ejemplo, un color semantico que referencia a un color 
+primitivo) y genera un unico archivo CSS con todas las variables.
+
+
+2. DEPENDENCIAS INSTALADAS
+================================================================================
+
+Se instalaron 2 dependencias de desarrollo (devDependencies):
+
+  a) style-dictionary (v5.3.3+)
+     - Herramienta de Amazon para transformar tokens de diseno en multiples 
+       formatos (CSS, Android, iOS, etc.)
+     - Es el motor principal que lee los tokens JSON y genera el archivo CSS.
+     - Documentacion: https://styledictionary.com/
+
+  b) @tokens-studio/sd-transforms (v2.0.3+)
+     - Plugin oficial de Tokens Studio para Style Dictionary.
+     - Agrega transformaciones y preprocesadores especificos para el formato 
+       de tokens que exporta Figma/Tokens Studio (formato DTCG).
+     - Se encarga de resolver correctamente los tipos de tokens ($type), 
+       las referencias ({Primitivos.Azul}), y las extensiones de Figma.
+     - Documentacion: https://github.com/tokens-studio/sd-transforms
+
+
+3. ARCHIVOS CREADOS
+================================================================================
+
+Se crearon 3 archivos nuevos en la raiz del proyecto:
+
+  a) package.json
+  ----------------
+  Archivo de configuracion de Node.js. Contiene:
+  
+  - Script "build": ejecuta "node build.mjs" para generar las variables CSS.
+  - devDependencies: las 2 dependencias mencionadas arriba.
+  
+  Contenido:
+  {
+    "scripts": {
+      "build": "node build.mjs"
+    },
+    "devDependencies": {
+      "@tokens-studio/sd-transforms": "^2.0.3",
+      "style-dictionary": "^5.3.3"
+    }
+  }
+
+
+  b) build.mjs
+  ----------------
+  Script principal que transforma los tokens en CSS. Hace lo siguiente 
+  paso a paso:
+
+  PASO 1 - Registro de plugins
+    Importa y registra el plugin de Tokens Studio (@tokens-studio/sd-transforms)
+    en Style Dictionary. Esto habilita el transformGroup "tokens-studio" y el 
+    preprocessor "tokens-studio" que entienden el formato de Figma.
+
+  PASO 2 - Lectura del archivo de tokens
+    Lee el archivo token/token.json que contiene los tokens exportados desde 
+    Figma. Este archivo tiene multiples "sets" (conjuntos) de tokens.
+
+  PASO 3 - Extraccion del orden de sets
+    Lee la seccion $metadata.tokenSetOrder del JSON para saber en que orden 
+    deben procesarse los sets. El orden importa porque los sets posteriores 
+    pueden sobreescribir valores de sets anteriores.
+
+  PASO 4 - Aplanamiento (flatten) de tokens
+    Recorre cada set en el orden definido y los fusiona en un unico objeto 
+    plano usando Object.assign(). Esto es necesario porque:
+    - Style Dictionary necesita un unico archivo de entrada.
+    - Las referencias cruzadas (ej: {Primitivos.Azul}) necesitan que todos 
+      los tokens esten al mismo nivel para resolverse correctamente.
+
+  PASO 5 - Escritura de archivo temporal
+    Guarda los tokens aplanados en token/.build/tokens-flat.json como archivo 
+    temporal para que Style Dictionary lo consuma.
+
+  PASO 6 - Configuracion de Style Dictionary
+    Crea una instancia de Style Dictionary con la siguiente configuracion:
+    - source: apunta al archivo temporal aplanado.
+    - preprocessors: usa "tokens-studio" para preprocesar los tokens.
+    - platforms.css: configura la salida CSS con:
+      - transformGroup: "tokens-studio" (transforma nombres, colores, tamaños)
+      - prefix: "sd" (todas las variables empiezan con --sd)
+      - buildPath: "build/css/" (carpeta de salida)
+      - destination: "_variables.css" (nombre del archivo generado)
+
+  PASO 7 - Build
+    Ejecuta sd.buildAllPlatforms() que genera el archivo CSS final.
+
+  PASO 8 - Limpieza
+    Elimina la carpeta temporal token/.build/ con los archivos intermedios.
+
+
+  c) .gitignore
+  ----------------
+  Indica a Git que archivos/carpetas ignorar:
+
+  - node_modules/   --> Dependencias instaladas (se regeneran con npm install)
+  - build/          --> Archivos generados (se regeneran con npm run build)
+  - token/.build/   --> Archivos temporales del proceso de build
+
+
+4. ESTRUCTURA DE LOS TOKENS (token/token.json)
+================================================================================
+
+El archivo de tokens exportado desde Figma contiene 7 sets de tokens, 
+procesados en este orden:
+
+  SET 1: "global"
+  ----------------
+  Vacio. No contiene tokens.
+
+  SET 2: "colors/Mode 1"
+  ----------------
+  Contiene 2 grupos:
+
+  - Primitivos (14 colores base):
+    Rojo (#ff0000), Azul (#005f86), Celeste (#65c9d8), Naranja (#f26c29),
+    Verde (#4ebfa4), Violeta (#8f8abd), AzulMarino (#052953), 
+    AzulCobalto (#7da9d5), Cyan (#009ec9), Negro (#000000), Gris (#6e6d6d),
+    Plata (#bcbcbc), Dorado (#d4ac87), Blanco (#ffffff)
+
+  - Semanticos (colores con significado, referencian a los primitivos):
+    * Navbar: color-nav-1 (Azul), color-nav-2 (Naranja)
+    * Brand: Bna-1 (Azul), Bna-2 (Celeste), Bna-3 (Naranja)
+    * Text: colorTextPrimary (Negro), colorLink (AzulMarino), 
+            colorTextSecondary (Gris), colorTextDisabled (Plata), 
+            colorText (Blanco)
+    * Background: colorBackground1 (Blanco)
+    * Border: colorBorderDefault (Plata), colorBorderStrong (Gris)
+    * Buttons: actionPrimary (Azul), actionPrimaryHover (Celeste),
+               actionSecondary (Naranja), actionSecondaryHover (Dorado),
+               actionPrimaryDisabled (Plata), actionSecondaryDisabled (Plata)
+    * Feedback: success (Verde), error (Rojo), warning (Dorado), info (Celeste)
+
+  SET 3: "font/Desktop"
+  ----------------
+  Tipografia para pantallas de escritorio:
+  - Font family: Open Sans
+  - Weights: Semibold, Regular, Light
+  - Tamaños: xs(12), sm(16), md(18), lg(20), xl(24), 2xl(32), 3xl(40), 4xl(48)
+  - Line heights: xs(16), sm(24), md(32), lg(40), xl(48)
+  - Letter spacing: tight(-1), normal(0), wide(2)
+  - Paragraph spacing y indent
+
+  SET 4: "font/Mobile"
+  ----------------
+  Tipografia para moviles (tamaños mas grandes):
+  - Tamaños: xs(16), sm(18), md(20), lg(24), xl(32), 2xl(40), 3xl(48), 4xl(56)
+  - Misma familia, pesos, line-heights que Desktop
+
+  SET 5: "font/Tablet"
+  ----------------
+  Tipografia para tablets:
+  - Mismos tamaños que Desktop
+  - Misma familia, pesos, line-heights
+
+  SET 6: "radius/Mode 1"
+  ----------------
+  Valores de border-radius:
+  none(0), xs(2), sm(4), md(8), lg(12), xl(16), 2xl(24), full(360)
+
+  SET 7: "spacing/Mode 1"
+  ----------------
+  Valores de espaciado (17 valores):
+  spacing-0(0), spacing-1(4), spacing-2(8), ... spacing-16(64)
+  Incrementos de 4px.
+
+
+5. COMO SE USA
+================================================================================
+
+  PRIMERA VEZ (instalar dependencias):
+  -------------------------------------
+  Abrir una terminal en la carpeta del proyecto y ejecutar:
+
+    npm install
+
+  Esto descarga e instala las dependencias en la carpeta node_modules/.
+  Solo es necesario hacerlo la primera vez o si se borran los node_modules.
+
+
+  GENERAR LAS VARIABLES CSS:
+  -------------------------------------
+  Cada vez que se actualicen los tokens desde Figma, ejecutar:
+
+    npm run build
+
+  Esto genera (o regenera) el archivo:
+
+    build/css/_variables.css
+
+
+  FLUJO DE TRABAJO TIPICO:
+  -------------------------------------
+  1. Modificar tokens en Figma usando Tokens Studio.
+  2. Hacer push de los tokens al repositorio (Tokens Studio lo hace 
+     automaticamente si esta configurado con GitHub).
+  3. Hacer pull en el proyecto local para obtener el token/token.json 
+     actualizado.
+  4. Ejecutar "npm run build" para regenerar las variables CSS.
+  5. El archivo build/css/_variables.css esta listo para usar.
+
+
+6. QUE GENERA EL BUILD
+================================================================================
+
+El build genera el archivo build/css/_variables.css con 94 lineas de codigo.
+
+Es un archivo CSS que define todas las variables bajo el selector :root, 
+lo que las hace disponibles globalmente. Todas las variables tienen el 
+prefijo "--sd".
+
+Las variables generadas se agrupan asi:
+
+  COLORES PRIMITIVOS (14 variables):
+    --sdPrimitivosRojo: #ff0000;
+    --sdPrimitivosAzul: #005f86;
+    --sdPrimitivosCeleste: #65c9d8;
+    ... etc.
+
+  COLORES SEMANTICOS (22 variables):
+    --sdSemanticosNavbarColorNav1: #005f86;
+    --sdSemanticosButtonsActionPrimary: #005f86;
+    --sdSemanticosFeedbackSuccess: #4ebfa4;
+    ... etc.
+    (Todas las referencias estan resueltas a su valor hex final)
+
+  TIPOGRAFIA (font family, weights, tamaños, line-heights, etc.):
+    --sdFamilyFontFamily: Open Sans;
+    --sdWeightSemibold: Semibold;
+    --sdSizeXs: 12;
+    --sdSizeSm: 16;
+    --sdLineHeightXs: 16;
+    ... etc.
+
+  BORDER RADIUS (7 variables):
+    --sdNone: 0;
+    --sdXs: 2;
+    --sdSm: 4;
+    --sdFull: 360;
+    ... etc.
+
+  SPACING (17 variables):
+    --sdSpacing0: 0;
+    --sdSpacing1: 4;
+    --sdSpacing2: 8;
+    ... hasta --sdSpacing16: 64;
+
+
+  EJEMPLO DE USO EN CSS:
+  ----------------------
+  .boton-primario {
+    background-color: var(--sdSemanticosButtonsActionPrimary);
+    color: var(--sdSemanticosTextColorText);
+    border-radius: var(--sdLg);
+    padding: var(--sdSpacing3) var(--sdSpacing4);
+    font-family: var(--sdFamilyFontFamily);
+    font-size: var(--sdSizeMd);
+  }
+
+  .boton-primario:hover {
+    background-color: var(--sdSemanticosButtonsActionPrimaryHover);
+  }
+
+
+7. NOTAS IMPORTANTES
+================================================================================
+
+  a) TIPOGRAFIA Y BREAKPOINTS
+     Como los 7 sets se aplanan en orden secuencial, y los sets de tipografia 
+     se procesan asi: Desktop -> Mobile -> Tablet, los valores de tipografia 
+     que quedan en el CSS final son los del ULTIMO set procesado (Tablet).
+     
+     En este caso Tablet tiene los mismos valores que Desktop, asi que no 
+     hay diferencia practica. Pero si en el futuro los valores de Tablet 
+     difieren de Desktop, los de Tablet van a pisar a los de Desktop.
+
+     Si se necesitase generar archivos CSS separados por breakpoint 
+     (Desktop, Mobile, Tablet), se puede modificar el build.mjs para 
+     procesar cada set de tipografia por separado y generar multiples 
+     archivos CSS.
+
+  b) REFERENCIAS CRUZADAS
+     Los tokens semanticos referencian a los primitivos usando la sintaxis 
+     {Primitivos.Azul}. El proceso de aplanamiento + Style Dictionary se 
+     encarga de resolver estas referencias automaticamente. En el CSS final 
+     solo aparecen los valores finales (ej: #005f86), no las referencias.
+
+  c) PREFIJO "sd"
+     Todas las variables CSS tienen el prefijo "--sd" para evitar colisiones 
+     con otras variables CSS del proyecto. Si se quisiera cambiar el prefijo, 
+     se modifica la linea "prefix: 'sd'" en build.mjs.
+
+  d) ARCHIVO GENERADO = NO EDITAR
+     El archivo build/css/_variables.css se regenera cada vez que se ejecuta 
+     el build. Cualquier cambio manual se perdera. Los cambios deben hacerse 
+     siempre en Figma y luego regenerar con "npm run build".
+
+  e) AGREGAR MAS PLATAFORMAS
+     El build.mjs actualmente solo genera CSS. Si en el futuro se necesitase 
+     generar tokens para Android (XML), iOS (Swift), o cualquier otro formato, 
+     se puede agregar mas plataformas en la configuracion de Style Dictionary 
+     dentro del build.mjs.
+
+
+================================================================================
+  FIN DE LA DOCUMENTACION
+================================================================================
